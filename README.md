@@ -1,10 +1,67 @@
-# AI GitHub Issue Resolution Agent — MVP
+# Autonomous GitHub Issue Resolution Agent
 
-An agent that takes a GitHub issue, explores the target repository, proposes
-a code fix with an LLM, and runs the test suite to check whether the fix
-actually works.
+> An AI software-engineering agent that reads a GitHub issue, retrieves relevant code
+> using hybrid lexical + semantic search, produces a structured implementation plan,
+> generates a safe unified diff, validates and executes it inside a Docker sandbox,
+> and reports verified test results — all from a single CLI command.
 
-This is the **Level 1 (MVP)** slice of a larger roadmap — see [Roadmap](#roadmap) below.
+---
+
+## What Problem Does This Solve?
+
+Fixing bugs requires three things a model is good at: **reading context**, **reasoning about code**, and **generating targeted changes**. What makes it hard is everything around that: finding the right files in a large repo, ensuring the generated change is safe to apply, running the tests without polluting the host machine, and feeding test failures back for correction.
+
+This project builds a complete, end-to-end pipeline for that workflow. Each stage is modular and independently testable, and the system degrades gracefully when optional components (Docker) are unavailable.
+
+---
+
+## Live Demo
+
+```bash
+python main.py \
+  --repo eventsesame-lgtm/ai-agent-test \
+  --issue 1 \
+  --apply \
+  --docker
+```
+
+**Real output:**
+
+```
+=== Issue ===
+#1: Fix multiplication function
+
+=== Candidate files (4) ===
+  score=0.251  calculator.py
+    symbol matches "multiply"; content matches "return"; lexical=0.21, semantic=0.33
+
+=== Implementation plan ===
+{
+  "summary": "multiply function returns sum instead of product",
+  "root_cause": "Implementation mistakenly uses addition operator instead of multiplication",
+  "files_to_modify": [{"path": "calculator.py", "reason": "multiply is defined here"}],
+  "implementation_steps": ["locate multiply", "change return a + b to return a * b"],
+  "tests_to_run": ["pytest tests/test_calculator.py"]
+}
+
+=== Proposed patch ===
+diff --git a/calculator.py b/calculator.py
+--- a/calculator.py
++++ b/calculator.py
+@@ -9,1 +9,1 @@
+-    return a + b
++    return a * b
+
+=== Docker sandbox: SUCCESS ===
+Patch applied inside sandbox: True
+Duration: 49.51s
+Sandbox cleaned up: True
+
+=== Tests: PASS ===
+3 passed in 0.18s
+```
+
+---
 
 ## Architecture
 
@@ -12,139 +69,209 @@ This is the **Level 1 (MVP)** slice of a larger roadmap — see [Roadmap](#roadm
 GitHub Issue
      │
      ▼
-GitHubClient.fetch_issue()   ──► title, body, labels
+GitHubClient ──────────────── GitHub REST API + shallow git clone
      │
      ▼
-GitHubClient.clone_repo()    ──► local checkout
+CodeRetriever ─────────────── Hybrid retrieval
+     │   ┌──────────────────────────────────┐
+     │   │ Lexical: keyword/path/symbol     │
+     │   │ Semantic: token-vector cosine    │
+     │   │ Hybrid:  alpha·lex + beta·sem    │
+     │   └──────────────────────────────────┘
      │
      ▼
-RepoExplorer.find_relevant_files()
-     │   (keyword-overlap scoring over file paths + contents)
-     ▼
-Candidate files (top-k, ranked)
+LLMPlanner.plan_fix() ──────── Structured investigation plan
+     │   problem · root_cause · files_to_modify · risks
      │
      ▼
-LLMPlanner.propose_fix()     ──► Groq (OpenAI-compatible API)
-     │   reasons over issue + candidate files
-     ▼
-Proposed fix (target file + explanation + new content)
+LLMPlanner.propose_fix() ───── Unified diff patch
+     │   uses the plan as input context
      │
      ▼
-TestRunner.run()             ──► pytest
+PatchManager ───────────────── Validation
+     │   path-traversal check · git apply --check
+     │   hunk normalization · whitespace tolerance
      │
-     ├── PASS ──► done
-     └── FAIL ──► (Level 2 adds a debug/retry loop here)
+     ▼
+DockerSandbox ──────────────── Isolated test execution
+     │   temp copy → mount → apply patch → install deps → pytest
+     │   timeout · resource limits · cleanup
+     │
+     ▼
+Result ─────────────────────── exit_code · stdout · stderr · duration
 ```
 
-## Project layout
+---
+
+## AI / Engineering Techniques
+
+| Technique | Where |
+|---|---|
+| LLM structured generation (JSON) | `LLMPlanner` — forces strict JSON output so the pipeline never parses free text |
+| Two-stage LLM pipeline | `plan_fix()` investigates, `propose_fix()` generates — separating reasoning from code output |
+| Hybrid lexical + semantic retrieval | `CodeRetriever` — cosine similarity on token vectors combined with keyword/symbol matching |
+| Symbol-aware chunking | `CodeRetriever` — splits by `def`/`class` to preserve function boundaries in LLM context |
+| Configurable retrieval modes | `keyword`, `semantic`, `hybrid` — weights adjustable via env vars |
+| Safe patch application | `PatchManager` — validates target paths, rejects traversal, normalizes hunk counts |
+| LLM output format validation | Rejects Cursor-format patches, non-standard diffs, missing fields, invalid types |
+| Docker sandbox isolation | `DockerSandbox` — patch applied only inside a container-mounted temp copy; host repo untouched |
+| Resource-limited execution | Configurable memory, CPU, network, timeout per run |
+| Fallback model routing | `GROQ_MODEL_A` primary → `GROQ_MODEL_B` fallback on API error or JSON parse failure |
+| 24/24 unit tests, no external API calls required | All mocked; Docker tests use `monkeypatch` |
+
+---
+
+## Project Structure
 
 ```
 ai-issue-agent/
-├── README.md
-├── requirements.txt
-├── .env.example
-├── main.py                  # CLI entrypoint
+├── main.py                  # CLI — --repo --issue --apply --docker
 ├── src/
-│   ├── config.py             # env var loading
-│   ├── github_client.py      # GitHub API + git clone
-│   ├── repo_explorer.py      # keyword-based file relevance search
-│   ├── llm_planner.py        # LLM reasoning -> proposed fix (JSON)
-│   ├── test_runner.py        # runs pytest, reports pass/fail
-│   └── agent.py               # orchestrates the pipeline above
+│   ├── config.py            # env var loading and validation
+│   ├── github_client.py     # GitHub REST API + git clone
+│   ├── repo_explorer.py     # keyword baseline (preserved for comparison)
+│   ├── retrieval.py         # hybrid lexical + semantic retrieval
+│   ├── llm_planner.py       # planning + patch generation, LLM abstraction
+│   ├── patcher.py           # patch validation, normalization, application
+│   ├── docker_sandbox.py    # Docker-based sandboxed execution
+│   ├── test_runner.py       # host-based pytest runner (--no-docker fallback)
+│   └── agent.py             # orchestrates the full pipeline
 └── tests/
-    └── test_agent.py         # unit tests (no network/API key required)
+    ├── test_agent.py        # retrieval + config tests
+    ├── test_patcher.py      # patch validation + LLM output validation
+    ├── test_retrieval.py    # hybrid retrieval ranking tests
+    └── test_docker_sandbox.py  # sandbox mocked unit tests
 ```
+
+---
 
 ## Setup
 
 ```bash
 git clone <this-repo>
 cd ai-issue-agent
-python -m venv venv && source venv/bin/activate
+python -m venv .venv && .venv\Scripts\activate   # Windows
+# source .venv/bin/activate                        # Linux/macOS
 pip install -r requirements.txt
-cp .env.example .env   # then fill in GITHUB_TOKEN and GROQ_* values
+cp .env.example .env
+# Fill in GITHUB_TOKEN and GROQ_API_KEY
 ```
 
-`.env` controls the Groq client:
+**Requirements:** Python 3.11+, Docker (for `--docker`), a [Groq API key](https://console.groq.com) (free tier works).
 
-- `GROQ_API_KEY` — Groq API key
-- `GROQ_BASE_URL` — OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`)
-- `GROQ_MODEL_A` — primary planner model
-- `GROQ_MODEL_B` — fallback if the primary call or JSON parse fails
-- `GROQ_SKIP_TEMPERATURE` — comma-separated model ids that reject `temperature` (e.g. `groq/compound`)
+---
+
+## Configuration
+
+All credentials and settings live in `.env`. No hard-coded values.
+
+```env
+# GitHub
+GITHUB_TOKEN=ghp_...
+
+# Groq (OpenAI-compatible)
+GROQ_API_KEY=gsk_...
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_MODEL_A=openai/gpt-oss-120b     # primary
+GROQ_MODEL_B=groq/compound           # fallback
+
+# Retrieval weights (hybrid = alpha·lexical + beta·semantic)
+RETRIEVAL_MODE=hybrid
+RETRIEVAL_LEXICAL_WEIGHT=0.65
+RETRIEVAL_SEMANTIC_WEIGHT=0.35
+RETRIEVAL_TOP_K=8
+
+# Docker sandbox
+DOCKER_IMAGE=python:3.11-slim
+DOCKER_TIMEOUT=120
+DOCKER_TEST_COMMAND=python -m pytest -q
+DOCKER_MEMORY=512m
+DOCKER_CPUS=1.0
+DOCKER_NETWORK_DISABLED=false
+```
+
+---
 
 ## Usage
 
 ```bash
-# Dry run: fetch issue, find candidate files, get a proposed fix (no writes)
-python main.py --repo octocat/Hello-World --issue 17
+# Dry run — fetch issue, retrieve code, produce plan + patch (no writes)
+python main.py --repo owner/repo --issue 17
 
-# Apply the fix to the local checkout and run tests
-python main.py --repo octocat/Hello-World --issue 17 --apply
+# Apply patch to local checkout and run tests on host
+python main.py --repo owner/repo --issue 17 --apply
+
+# Apply patch and run tests inside Docker sandbox (recommended)
+python main.py --repo owner/repo --issue 17 --apply --docker
 ```
 
-Example output:
+---
 
-```
-=== Issue ===
-#17: Login returns 500 when email is missing
-
-=== Candidate files (5) ===
-  score=274  src/auth/controller.py
-  score=118  tests/test_auth.py
-  ...
-
-=== Proposed fix ===
-{
-  "target_file": "src/auth/controller.py",
-  "explanation": "login() dereferences `email` before checking it's present..."
-}
-
-=== Tests: PASS ===
-```
-
-## Running the test suite
+## Tests
 
 ```bash
 python -m pytest -v
 ```
 
-The unit tests cover `RepoExplorer` (relevance ranking, ignoring vendored
-directories) and `Config` (env var validation) without needing an API key
-or network access, so they run in CI cleanly.
+```
+24 passed in 1.17s
+```
 
-## Design decisions
+All tests run without Docker, a GitHub token, or a Groq API key. Docker-specific tests use `monkeypatch` to mock `subprocess.run`.
 
-- **Keyword scoring instead of embeddings for repo search.** For an MVP,
-  TF-style keyword overlap over file paths + contents is enough to
-  demonstrate the pipeline end-to-end and is trivial to reason about /
-  debug. Swapping in embeddings (Level 3) is a drop-in replacement for
-  `RepoExplorer.find_relevant_files` — nothing else in the pipeline needs
-  to change.
-- **Single-file, full-content fixes instead of diffs.** Full file
-  replacement is simpler to implement and verify than diff/patch
-  generation, at the cost of not scaling to multi-file changes. Level 2
-  upgrades this to unified diffs so `git diff` and PR generation work
-  cleanly on larger changes.
-- **Shallow clone + local pytest instead of a sandboxed container.**
-  Keeps the MVP runnable with nothing but git + pytest installed. Level 2
-  moves test execution into an isolated Docker container so untrusted
-  LLM-generated code never runs directly on the host.
-- **JSON-only LLM output.** The planner prompt forces a strict JSON
-  response so the rest of the pipeline can consume it programmatically
-  without parsing markdown or free text.
+---
+
+## Sandbox Isolation
+
+When `--docker` is used:
+
+1. The cloned repository is **copied** into a temporary directory on the host.
+2. That copy is **volume-mounted** into a fresh Docker container.
+3. The patch is **applied inside the container** by a Python helper script.
+4. Tests run inside Docker. The container is removed when finished.
+5. The **original cloned repository on the host is never modified**.
+
+This means LLM-generated code executes inside Docker, not directly on the host machine.
+
+---
+
+## Design Decisions
+
+**Why two LLM calls (plan then patch)?**
+Separating investigation from code generation produces higher-quality patches. The first call (`plan_fix`) reasons about root cause and which files to touch. The second call (`propose_fix`) receives that plan as context and focuses purely on writing a correct diff.
+
+**Why hybrid retrieval over embeddings-only?**
+Lexical search catches exact identifiers and function names that embedding models can miss. Semantic search catches conceptually related code. Combining them with configurable weights gives better coverage than either alone without requiring an external vector database.
+
+**Why unified diffs instead of full-file rewrites?**
+A diff is reviewable, auditable, and safe to apply. A full-file rewrite silently discards unrelated changes and makes code review meaningless. `PatchManager` validates the diff structure, normalizes malformed hunk counts from the LLM, and runs `git apply --check` before touching any file.
+
+**Why Docker?**
+LLM-generated code should not run directly on the developer's machine. Docker provides a disposable, resource-limited environment with no access to the host filesystem beyond the mounted sandbox copy.
+
+---
+
+## Limitations
+
+- Single-file patches only (multi-file diffs planned for next stage).
+- Python projects only (test runner assumes `pytest`).
+- No retry loop yet — test failures are reported but not fed back to the LLM for correction.
+- No git branch/commit/PR workflow yet.
+- Semantic retrieval uses local token-vector cosine similarity, not a heavyweight embedding model. It is fast and requires no external service, but may miss distant semantic relationships.
+- Docker image pull adds ~30–60s on the first run.
+
+---
 
 ## Roadmap
 
-| Level | Adds |
-|---|---|
-| 🟢 1 — MVP (this repo) | issue ingestion, repo exploration, code retrieval, LLM reasoning, proposed fix, basic tests |
-| 🟡 2 — Recruiter-ready | real code modification via diffs, Docker-isolated test execution, retry/debug loop, git branch + diff, PR generation, logging |
-| 🔴 3 — Advanced | RAG/embeddings over large repos, multi-agent planning, long-term memory, security sandbox, model routing, evaluation benchmark, CI/CD, cloud deployment |
-
-## Evaluation (planned for Level 2)
-
-Once the debug/retry loop and PR generation land, this will be measured
-against a fixed set of ~30 controlled GitHub issues, tracking: correct
-file identified, fix generated, tests passed, successful PR rate, average
-iterations, and average latency.
+| Stage | Status | Description |
+|---|---|---|
+| Hybrid retrieval | ✅ Done | lexical + semantic + symbol-aware chunking |
+| Explicit planning | ✅ Done | structured plan before patch generation |
+| Patch generation | ✅ Done | unified diff with validation and normalization |
+| Docker sandbox | ✅ Done | isolated execution, resource limits, cleanup |
+| Retry / debug loop | 🔲 Next | feed test failures back to LLM, max 3 attempts |
+| Git branch + commit | 🔲 Next | `agent/fix-issue-N` branch, meaningful commit |
+| Pull request | 🔲 Next | optional `--create-pr` with structured description |
+| Evaluation benchmark | 🔲 Planned | 10–20 real issues, retrieval + patch + test metrics |
+| Structured observability | 🔲 Planned | run IDs, stage timing, structured logs |

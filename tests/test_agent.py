@@ -41,6 +41,7 @@ def test_find_relevant_files_ignores_vendored_dirs(tmp_path):
 
 
 def test_config_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AI_ISSUE_AGENT_SKIP_DOTENV", "1")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(EnvironmentError):
         Config.from_env()
@@ -52,6 +53,16 @@ def test_config_reads_from_env(monkeypatch):
     monkeypatch.setenv("GROQ_MODEL_A", "openai/gpt-oss-120b")
     monkeypatch.setenv("GROQ_MODEL_B", "groq/compound")
     monkeypatch.setenv("GROQ_SKIP_TEMPERATURE", "groq/compound")
+    monkeypatch.setenv("RETRIEVAL_TOP_K", "5")
+    monkeypatch.setenv("RETRIEVAL_MODE", "keyword")
+    monkeypatch.setenv("RETRIEVAL_LEXICAL_WEIGHT", "0.8")
+    monkeypatch.setenv("RETRIEVAL_SEMANTIC_WEIGHT", "0.2")
+    monkeypatch.setenv("DOCKER_IMAGE", "python:3.11-slim")
+    monkeypatch.setenv("DOCKER_TIMEOUT", "90")
+    monkeypatch.setenv("DOCKER_TEST_COMMAND", "python -m pytest tests")
+    monkeypatch.setenv("DOCKER_MEMORY", "256m")
+    monkeypatch.setenv("DOCKER_CPUS", "0.5")
+    monkeypatch.setenv("DOCKER_NETWORK_DISABLED", "true")
     monkeypatch.setenv("GITHUB_TOKEN", "ghp-test-456")
     config = Config.from_env()
     assert config.groq_api_key == "gsk_test-123"
@@ -59,6 +70,16 @@ def test_config_reads_from_env(monkeypatch):
     assert config.groq_model_a == "openai/gpt-oss-120b"
     assert config.groq_model_b == "groq/compound"
     assert "groq/compound" in config.groq_skip_temperature
+    assert config.retrieval_top_k == 5
+    assert config.retrieval_mode == "keyword"
+    assert config.retrieval_lexical_weight == 0.8
+    assert config.retrieval_semantic_weight == 0.2
+    assert config.docker_image == "python:3.11-slim"
+    assert config.docker_timeout == 90
+    assert config.docker_test_command == "python -m pytest tests"
+    assert config.docker_memory == "256m"
+    assert config.docker_cpus == "0.5"
+    assert config.docker_network_disabled is True
     assert config.github_token == "ghp-test-456"
 
 
