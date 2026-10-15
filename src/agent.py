@@ -4,7 +4,7 @@ Issue -> repo exploration -> LLM reasoning -> proposed fix -> tests
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from .config import Config
 from .docker_sandbox import DockerSandbox, DockerSandboxResult
@@ -45,10 +45,19 @@ class IssueResolutionAgent:
         issue_number: int,
         apply_fix: bool = False,
         use_docker: bool = False,
+        local_repo_path: Optional[str] = None,
+        progress_callback: Optional[Callable[[str, str], None]] = None,
     ) -> RunResult:
-        issue = self.github.fetch_issue(repo, issue_number)
-        repo_path = self.github.clone_repo(repo)
+        def emit(stage: str, message: str) -> None:
+            if progress_callback:
+                progress_callback(stage, message)
 
+        emit("fetch_issue", f"Fetching issue #{issue_number}")
+        issue = self.github.fetch_issue(repo, issue_number)
+        emit("clone_repo", "Preparing repository")
+        repo_path = self.github.clone_repo(repo, dest_dir=local_repo_path)
+
+        emit("retrieve", "Finding relevant files")
         retriever = CodeRetriever(
             repo_path,
             lexical_weight=self.config.retrieval_lexical_weight,
@@ -61,7 +70,9 @@ class IssueResolutionAgent:
             mode=self.config.retrieval_mode,
         )
 
+        emit("plan", "Analyzing issue and repository context")
         plan = self.planner.plan_fix(issue, candidates)
+        emit("propose_fix", "Generating proposed fix")
         proposal = self.planner.propose_fix(issue, candidates, plan=plan)
 
         patch_result = None
@@ -69,6 +80,7 @@ class IssueResolutionAgent:
         test_result = None
         applied = False
         if apply_fix and proposal.get("target_file") and proposal.get("patch"):
+            emit("apply_patch", "Validating and applying patch")
             patch_manager = PatchManager(repo_path)
             if use_docker:
                 try:
@@ -107,8 +119,12 @@ class IssueResolutionAgent:
                 )
                 applied = patch_result.applied
                 if applied:
+                    emit("run_tests", "Running tests")
                     test_result = TestRunner(repo_path).run()
+        else:
+            emit("complete", "Generated fix without applying it")
 
+        emit("complete", "Agent completed")
         return RunResult(
             issue=issue,
             candidate_files=candidates,

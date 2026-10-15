@@ -31,19 +31,20 @@ class Config:
     docker_network_disabled: bool = False
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls, override_dotenv: bool = False) -> "Config":
         # Load .env if python-dotenv is available; otherwise fall back to
         # whatever is already in the environment.
         if os.environ.get("AI_ISSUE_AGENT_SKIP_DOTENV") != "1":
             try:
                 from dotenv import load_dotenv
 
-                load_dotenv()
+                load_dotenv(override=override_dotenv)
             except ImportError:
                 pass
 
         github_token = os.environ.get("GITHUB_TOKEN", "")
         groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        # Defaults stay aligned with .env.example Groq settings.
         groq_base_url = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
         groq_model_a = os.environ.get("GROQ_MODEL_A", "openai/gpt-oss-120b")
         groq_model_b = os.environ.get("GROQ_MODEL_B", "groq/compound")

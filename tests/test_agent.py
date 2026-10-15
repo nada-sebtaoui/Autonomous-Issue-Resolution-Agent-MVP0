@@ -47,6 +47,22 @@ def test_config_requires_api_key(monkeypatch):
         Config.from_env()
 
 
+def test_config_defaults_match_env_example(monkeypatch):
+    monkeypatch.setenv("AI_ISSUE_AGENT_SKIP_DOTENV", "1")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test-123")
+    monkeypatch.delenv("GROQ_BASE_URL", raising=False)
+    monkeypatch.delenv("GROQ_MODEL_A", raising=False)
+    monkeypatch.delenv("GROQ_MODEL_B", raising=False)
+    monkeypatch.delenv("GROQ_SKIP_TEMPERATURE", raising=False)
+
+    config = Config.from_env()
+
+    assert config.groq_base_url == "https://api.groq.com/openai/v1"
+    assert config.groq_model_a == "openai/gpt-oss-120b"
+    assert config.groq_model_b == "groq/compound"
+    assert config.groq_skip_temperature == frozenset({"groq/compound"})
+
+
 def test_config_reads_from_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test-123")
     monkeypatch.setenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")

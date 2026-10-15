@@ -205,6 +205,22 @@ python main.py --repo owner/repo --issue 17 --apply
 python main.py --repo owner/repo --issue 17 --apply --docker
 ```
 
+## Browser UI
+
+For manual testing without Git Bash commands, start the small local web UI:
+
+```bash
+python web_app.py
+```
+
+Then open <http://127.0.0.1:8000>. Enter your GitHub token, repository, issue
+number, and optional local repository path. The token is sent only in the local
+POST request body and is not written to UI logs.
+
+The UI reuses the existing `IssueResolutionAgent` pipeline. Enable **Apply fix
+and run tests** to mirror `--apply`, and enable **Use Docker sandbox** to mirror
+`--docker`.
+
 ---
 
 ## Tests

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI GitHub Issue Agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Developer testing UI</div>
+        <h1> AI GitHub Issue Agent</h1>
+        <p>Analyze GitHub issues, find the relevant code, and generate fixes with AI.</p>
+      </section>
+
+      <section class="card">
+        <form id="agent-form" autocomplete="off">
+          <div class="field">
+            <label for="token">GitHub Token</label>
+            <div class="input-action">
+              <input id="token" name="token" type="password" placeholder="GitHub Personal Access Token" required />
+              <button class="icon-button" type="button" id="toggle-token" aria-label="Show token">👁</button>
+            </div>
+            <p>Your token is used to access the GitHub repository and issue.</p>
+          </div>
+
+          <div class="field">
+            <label for="repo">Repository</label>
+            <input id="repo" name="repo" type="text" placeholder="owner/repository" required />
+            <p>Example: <code>facebook/react</code></p>
+          </div>
+
+          <div class="field small">
+            <label for="issue">Issue Number</label>
+            <input id="issue" name="issue" type="number" min="1" step="1" placeholder="1" required />
+          </div>
+
+          <div class="field">
+            <label for="local-path">Local Repository Path <span>optional</span></label>
+            <div class="input-action">
+              <input id="local-path" name="localPath" type="text" placeholder="C:\Users\...\my-project" />
+              <span class="input-icon">📁</span>
+            </div>
+            <p>Leave empty to let the agent clone a temporary checkout.</p>
+          </div>
+
+          <div class="options">
+            <label>
+              <input id="apply-fix" type="checkbox" />
+              Apply fix and run tests
+            </label>
+            <label>
+              <input id="use-docker" type="checkbox" />
+              Use Docker sandbox
+            </label>
+          </div>
+
+          <button class="primary" id="run-button" type="submit" disabled>🚀 Run AI Agent</button>
+          <p class="form-error" id="form-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="progress-panel hidden" id="progress-panel" aria-live="polite">
+        <div class="section-heading">
+          <div>
+            <h2 id="progress-title">Running AI Agent...</h2>
+            <p id="progress-subtitle">This can take a minute while the LLM generates a fix.</p>
+          </div>
+          <span class="pill" id="run-status">Queued</span>
+        </div>
+        <div class="steps" id="steps"></div>
+      </section>
+
+      <section class="result-panel hidden" id="result-panel"></section>
+
+      <details class="logs hidden" id="logs-panel">
+        <summary>Show logs</summary>
+        <pre id="logs"></pre>
+      </details>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -4,7 +4,7 @@ import json
 import re
 from typing import FrozenSet, List, Optional
 
-from openai import APIError, OpenAI
+from openai import OpenAI, OpenAIError
 
 
 class LLMOutputError(ValueError):
@@ -121,7 +121,7 @@ class LLMPlanner:
                 )
                 text = response.choices[0].message.content or ""
                 return validator(self._parse_json(text))
-            except (json.JSONDecodeError, APIError, LLMOutputError) as exc:
+            except (json.JSONDecodeError, OpenAIError, LLMOutputError) as exc:
                 last_error = exc
                 continue
 
